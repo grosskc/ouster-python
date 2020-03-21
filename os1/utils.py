@@ -7,11 +7,16 @@ from os1.packet import (
     CHANNEL_BLOCK_COUNT,
     azimuth_angle,
     azimuth_block,
+    azimuth_encoder_count,
+    azimuth_frame_id,
     azimuth_measurement_id,
     azimuth_timestamp,
     azimuth_valid,
     channel_block,
     channel_range,
+    channel_reflectivity,
+    channel_signal_photons,
+    channel_noise_photons,
     unpack,
 )
 
@@ -31,8 +36,18 @@ class UninitializedTrigTable(Exception):
         super(UninitializedTrigTable, self).__init__(msg)
 
 
-_trig_table = []
+class UninitializedRawTable(Exception):
+    def __init__(self):
+        msg = (
+            "You must build_raw_table prior to calling raw_point or"
+            "raw_points.\n\n"
+            "This is likely because you are in a multiprocessing environment."
+        )
+        super(UninitializedRawTable, self).__init__(msg)
 
+
+_trig_table = []
+_raw_table = []
 
 def build_trig_table(beam_altitude_angles, beam_azimuth_angles):
     if not _trig_table:
@@ -46,6 +61,12 @@ def build_trig_table(beam_altitude_angles, beam_azimuth_angles):
             )
 
 
+def build_raw_table(beam_altitude_angles, beam_azimuth_angles):
+    if not _raw_table:
+        for i in range(CHANNEL_BLOCK_COUNT):
+            _raw_table.append([beam_azimuth_angles[i], beam_altitude_angles[i]])
+
+
 def xyz_point(channel_n, azimuth_block):
     if not _trig_table:
         raise UninitializedTrigTable()
@@ -55,8 +76,8 @@ def xyz_point(channel_n, azimuth_block):
     range = channel_range(channel) / 1000  # to meters
     adjusted_angle = table_entry[2] + azimuth_angle(azimuth_block)
     x = -range * table_entry[1] * math.cos(adjusted_angle)
-    y = range * table_entry[1] * math.sin(adjusted_angle)
-    z = range * table_entry[0]
+    y = +range * table_entry[1] * math.sin(adjusted_angle)
+    z = +range * table_entry[0]
 
     return [x, y, z]
 
@@ -136,6 +157,35 @@ def xyz_columns(packet, os16=False):
             z.append(point[2])
         points.append([x, y, z])
     return points
+
+
+def raw_point(ChannelID, azimuth_block):
+    if not _raw_table: raise UninitializedRawTable()
+    channel = channel_block(ChannelID, azimuth_block)
+    MeasurementID = azimuth_measurement_id(azimuth_block)
+    FrameID = azimuth_frame_id(azimuth_block)
+    Timestamp = azimuth_timestamp(azimuth_block)
+    EncoderPosition = azimuth_encoder_count(azimuth_block)
+    Range = channel_range(channel) # [mm]
+    Reflectivity = channel_reflectivity(channel)
+    Signal = channel_signal_photons(channel)
+    Noise = channel_noise_photons(channel)
+
+    return [FrameID, MeasurementID, ChannelID, Timestamp, EncoderPosition, Range, Reflectivity, Signal, Noise]
+
+
+def raw_points(packet, os16=False):
+    channels = OS_16_CHANNELS if os16 else OS_64_CHANNELS
+    if not isinstance(packet, tuple):
+        packet = unpack(packet)
+
+    raw = []
+    for b in range(AZIMUTH_BLOCK_COUNT):
+        block = azimuth_block(b, packet)
+        if azimuth_valid(block):
+            for c in channels: 
+                raw.append(raw_point(c, block))
+    return raw
 
 
 _unpack = struct.Struct("<I").unpack

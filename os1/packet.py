@@ -56,7 +56,7 @@ def azimuth_encoder_count(azimuth_block):
 
 
 def azimuth_angle(azimuth_block):
-    return RADIANS_360 * azimuth_block[3] / TICKS_PER_REVOLUTION
+    return 360 * azimuth_block[3] / TICKS_PER_REVOLUTION # [deg]
 
 
 def azimuth_valid(azimuth_block):
