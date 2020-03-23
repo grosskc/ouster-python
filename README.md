@@ -20,12 +20,16 @@ def handler(raw_packet):
         for coords in zip(x, y, z):
             f.write("{}\n".format(','.join(coords)))
 
+def handler(raw_packet):
+    x,y,z = xyz_points(raw_packet)
+    return (x, y, z)
 
-os1 = OS1('10.0.0.3', '10.0.0.1', mode='1024x10')  # OS1 sensor IP, destination IP, and resolution
+os1 = OS1('192.168.1.100', '192.168.1.2', mode='1024x10')  # OS1 sensor IP, destination IP, and resolution
 # Inform the sensor of the destination host and reintialize it
 os1.start()
 # Start the loop which will handle and dispatch each packet to the handler
 # function for processing
+# out = os1.handle_request(handler)
 os1.run_forever(handler)
 ```
 
@@ -50,13 +54,13 @@ unprocessed_packets = Queue()
 
 def handler(packet):
     unprocessed_packets.put(packet)
-    
-    
+
+
 def worker(queue, beam_altitude_angles, beam_azimuth_angles) :
     build_trig_table(beam_altitude_angles, beam_azimuth_angles)
     while True:
         packet = queue.get()
-        coords = xyz_points(packet) 
+        coords = xyz_points(packet)
         # do work...
 
 
@@ -71,8 +75,8 @@ def spawn_workers(n, worker, *args, **kwargs):
         process.start()
         processes.append(process)
     return processes
-    
-    
+
+
 os1 = OS1(OS1_IP, HOST_IP)
 beam_intrinsics = json.loads(os1.get_beam_intrinsics())
 beam_alt_angles = beam_intrinsics['beam_altitude_angles']
