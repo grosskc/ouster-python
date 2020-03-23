@@ -6,7 +6,6 @@ import time
 from functools import partial
 
 from os1.server import RequestHandler, UDPServer, ThreadingUDPServer
-from os1.utils import build_trig_table
 
 
 class OS1ConfigurationError(Exception):
@@ -16,9 +15,7 @@ class OS1ConfigurationError(Exception):
 class OS1(object):
     MODES = ("512x10", "512x20", "1024x10", "1024x20", "2048x10")
 
-    def __init__(
-        self, sensor_ip, dest_ip, udp_port=7502, tcp_port=7501, mode="2048x10"
-    ):
+    def __init__(self, sensor_ip, dest_ip, udp_port=7502, tcp_port=7501, mode="2048x10"):
         assert mode in self.MODES, "Mode must be one of {}".format(self.MODES)
         self.dest_host = dest_ip
         self.udp_port = udp_port
@@ -39,10 +36,6 @@ class OS1(object):
         time.sleep(0.1)
 
         self._beam_intrinsics = json.loads(self.get_beam_intrinsics())
-        build_trig_table(
-            self._beam_intrinsics["beam_altitude_angles"],
-            self._beam_intrinsics["beam_azimuth_angles"],
-        )
         time.sleep(0.1)
 
         self.reinitialize()

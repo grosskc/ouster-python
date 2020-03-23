@@ -1,6 +1,7 @@
 import math
 import struct
 
+# TODO This will require modification if we use a OS1-128
 PACKET_SIZE = 12608
 TICKS_PER_REVOLUTION = 90112
 AZIMUTH_BLOCK_COUNT = 16  # Azimuth blocks per packet

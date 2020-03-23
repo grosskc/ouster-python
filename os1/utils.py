@@ -2,10 +2,11 @@ import math
 import struct
 import sys
 
+import numpy as np
+
 from os1.packet import (
     AZIMUTH_BLOCK_COUNT,
     CHANNEL_BLOCK_COUNT,
-    azimuth_angle,
     azimuth_block,
     azimuth_encoder_count,
     azimuth_frame_id,
@@ -20,149 +21,34 @@ from os1.packet import (
     unpack,
 )
 
+# TODO This will require modification if we use a OS1-128
 # The OS-16 will still contain 64 channels in the packet, but only
 # every 4th channel starting at the 2nd will contain data .
 OS_16_CHANNELS = (2, 6, 10, 14, 18, 22, 26, 30, 34, 38, 42, 46, 50, 54, 58, 62)
 OS_64_CHANNELS = tuple(i for i in range(CHANNEL_BLOCK_COUNT))
 
-
-class UninitializedTrigTable(Exception):
-    def __init__(self):
-        msg = (
-            "You must build_trig_table prior to calling xyz_point or"
-            "xyz_points.\n\n"
-            "This is likely because you are in a multiprocessing environment."
-        )
-        super(UninitializedTrigTable, self).__init__(msg)
-
-
-class UninitializedRawTable(Exception):
-    def __init__(self):
-        msg = (
-            "You must build_raw_table prior to calling raw_point or"
-            "raw_points.\n\n"
-            "This is likely because you are in a multiprocessing environment."
-        )
-        super(UninitializedRawTable, self).__init__(msg)
-
-
-_trig_table = []
-_raw_table = []
-
-def build_trig_table(beam_altitude_angles, beam_azimuth_angles):
-    if not _trig_table:
-        for i in range(CHANNEL_BLOCK_COUNT):
-            _trig_table.append(
-                [
-                    math.sin(beam_altitude_angles[i] * math.radians(1)),
-                    math.cos(beam_altitude_angles[i] * math.radians(1)),
-                    beam_azimuth_angles[i] * math.radians(1),
-                ]
-            )
-
-
-def build_raw_table(beam_altitude_angles, beam_azimuth_angles):
-    if not _raw_table:
-        for i in range(CHANNEL_BLOCK_COUNT):
-            _raw_table.append([beam_azimuth_angles[i], beam_altitude_angles[i]])
-
-
-def xyz_point(channel_n, azimuth_block):
-    if not _trig_table:
-        raise UninitializedTrigTable()
-
-    channel = channel_block(channel_n, azimuth_block)
-    table_entry = _trig_table[channel_n]
-    range = channel_range(channel) / 1000  # to meters
-    adjusted_angle = table_entry[2] + azimuth_angle(azimuth_block)
-    x = -range * table_entry[1] * math.cos(adjusted_angle)
-    y = +range * table_entry[1] * math.sin(adjusted_angle)
-    z = +range * table_entry[0]
-
-    return [x, y, z]
-
-
-def xyz_points(packet, os16=False):
-    """
-    Returns a tuple of x, y, z points where each x, y, z is a list of
-    all the x, y or z points in the packet
-
-        (
-            [x1, x2, ...],
-            [y1, y2, ...],
-            [z1, z2, ...],
-        )
-    """
-    channels = OS_16_CHANNELS if os16 else OS_64_CHANNELS
-    if not isinstance(packet, tuple):
-        packet = unpack(packet)
-
-    x = []
-    y = []
-    z = []
-
-    for b in range(AZIMUTH_BLOCK_COUNT):
-        block = azimuth_block(b, packet)
-
-        if not azimuth_valid(block):
-            continue
-
-        for c in channels:
-            point = xyz_point(c, block)
-            x.append(point[0])
-            y.append(point[1])
-            z.append(point[2])
-    return x, y, z
-
-
-def xyz_columns(packet, os16=False):
-    """
-    Similar to xyz_points except the x, y, z values are ordered by
-    column. This is convenient if you only want to render a specific
-    column.
-
-    The structure of it will be be columns containing channels. It
-    looks like...
-
-        [
-            # column 1
-            [
-                [channel1_x, channel2_x, ...],
-                [channel1_y, channel2_y, ...],
-                [channel1_z, channel2_z, ...],
-            ],
-            # column 2
-            [
-                [channel1_x, channel2_x, ...],
-                [channel1_y, channel2_y, ...],
-                [channel1_z, channel2_z, ...],
-            ],
-        ]
-    """
-    channels = OS_16_CHANNELS if os16 else OS_64_CHANNELS
-    if not isinstance(packet, tuple):
-        packet = unpack(packet)
-
-    points = []
-    for b in range(AZIMUTH_BLOCK_COUNT):
-        block = azimuth_block(b, packet)
-        x = []
-        y = []
-        z = []
-
-        for channel in channels:
-            point = xyz_point(channel, block)
-            x.append(point[0])
-            y.append(point[1])
-            z.append(point[2])
-        points.append([x, y, z])
-    return points
-
+RAW_NAMES = ["FrameID", "AzimuthID", "ChannelID", "Timestamp", "EncoderPosition", "Range", "Reflectivity", "Signal", "Noise"]
+RAW_DTYPE = [np.uint16, np.uint16, np.uint16, np.uint64, np.uint32, np.uint32, np.uint16, np.uint16, np.uint16]
 
 def raw_point(ChannelID, azimuth_block):
-    if not _raw_table: raise UninitializedRawTable()
+    """
+    Returns a raw data point for a given `ChannelID` and `AzimuthID` within
+    a single packet.
+
+    Parameters
+    ----------
+    ChannelID : uint16
+        number between 0 and `N_CHANNEL`-1 identifying the Ouster channel
+    azimuth_block : list of packet data
+        raw packet data from the azimuth block for processing
+
+    Returns
+    -------
+    data : list
+        [FrameID, AzimuthID, ChannelID, Timestamp, EncoderPosition, Range, Reflectivity, Signal, Noise]
+    """
     channel = channel_block(ChannelID, azimuth_block)
-    MeasurementID = azimuth_measurement_id(azimuth_block)
+    AzimuthID = azimuth_measurement_id(azimuth_block)
     FrameID = azimuth_frame_id(azimuth_block)
     Timestamp = azimuth_timestamp(azimuth_block)
     EncoderPosition = azimuth_encoder_count(azimuth_block)
@@ -171,10 +57,25 @@ def raw_point(ChannelID, azimuth_block):
     Signal = channel_signal_photons(channel)
     Noise = channel_noise_photons(channel)
 
-    return [FrameID, MeasurementID, ChannelID, Timestamp, EncoderPosition, Range, Reflectivity, Signal, Noise]
+    return [FrameID, AzimuthID, ChannelID, Timestamp, EncoderPosition, Range, Reflectivity, Signal, Noise]
 
 
 def raw_points(packet, os16=False):
+    """
+    Returns a list of raw data point lists for a given packet.
+
+    Parameters
+    ----------
+    packet : bytearray
+        UDP raw packet data
+    azimuth_block : list of packet data
+        raw packet data from the azimuth block for processing
+
+    Returns
+    -------
+    data : list
+        [FrameID, AzimuthID, ChannelID, Timestamp, EncoderPosition, Range, Reflectivity, Signal, Noise]
+    """
     channels = OS_16_CHANNELS if os16 else OS_64_CHANNELS
     if not isinstance(packet, tuple):
         packet = unpack(packet)
